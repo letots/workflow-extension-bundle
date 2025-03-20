@@ -16,6 +16,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 abstract class AbstractWorkflow extends Workflow implements WorkflowInterface
 {
+	// private $initial
 	private string|array|null $initial = null;
 	
 	public function __construct()
