@@ -6,5 +6,5 @@ interface WorkflowInterface
 {
 	public function getPlaces(): array;
 	
-	public function getTransitions(array $places): array;
+	public function getTransitions(array $places, string $type): array;
 }
