@@ -15,6 +15,8 @@ class AsWorkflow
 		public string $markingStoreProperty = 'status',
 		public string $type = self::TYPE_STATE_MACHINE,
 		public string|array|null $supportStrategy = null,
+		public ?array $metadata = null,
+		public bool $auditTrail = false,
 	) {
 	}
 }

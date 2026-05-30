@@ -7,8 +7,12 @@ use LeTots\WorkflowExtension\Attribute\AsWorkflow;
 use LeTots\WorkflowExtension\Attribute\Place;
 use LeTots\WorkflowExtension\Attribute\Transition;
 use ReflectionClass;
+use SplObjectStorage;
 use Symfony\Component\Workflow\Definition;
 use Symfony\Component\Workflow\MarkingStore\MethodMarkingStore;
+use Symfony\Component\Workflow\Metadata\InMemoryMetadataStore;
+use Symfony\Component\Workflow\Validator\StateMachineValidator;
+use Symfony\Component\Workflow\Validator\WorkflowValidator;
 use Symfony\Component\Workflow\Workflow;
 use Symfony\Component\Workflow\Transition as WorkflowTransition;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
@@ -16,6 +20,11 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 abstract class AbstractWorkflow extends Workflow implements WorkflowInterface
 {
 	private string|array|null $initial = null;
+
+	/** @var array<string, array<string, mixed>> */
+	private array $placesMetadata = [];
+
+	private SplObjectStorage $transitionsMetadata;
 
 	public function __construct(
 		?EventDispatcherInterface $eventDispatcher = null,
@@ -32,6 +41,8 @@ abstract class AbstractWorkflow extends Workflow implements WorkflowInterface
 		}
 
 		$attributeInstance = $workflowAttributes[0]->newInstance();
+		$this->placesMetadata = [];
+		$this->transitionsMetadata = new SplObjectStorage();
 		$places = $this->getPlaces();
 		$transitions = $this->getTransitions($places, $attributeInstance->type);
 
@@ -44,7 +55,10 @@ abstract class AbstractWorkflow extends Workflow implements WorkflowInterface
 			}
 		}
 
-		$definition = new Definition($places, $transitions, $this->initial);
+		$metadataStore = $this->buildMetadataStore($attributeInstance->metadata);
+		$definition = new Definition($places, $transitions, $this->initial, $metadataStore);
+		$this->validateDefinition($definition, $attributeInstance->name, $attributeInstance->type);
+
 		$markingStore = new MethodMarkingStore(
 			$attributeInstance->type === AsWorkflow::TYPE_STATE_MACHINE,
 			$attributeInstance->markingStoreProperty,
@@ -73,12 +87,17 @@ abstract class AbstractWorkflow extends Workflow implements WorkflowInterface
 
 			/** @var Place $placeAttribute */
 			$placeAttribute = $constantPlaceAttributes[0]->newInstance();
+			$placeName = $reflectionClassConstant->getValue();
 
 			if ($placeAttribute->initial) {
-				$this->initial[] = $reflectionClassConstant->getValue();
+				$this->initial[] = $placeName;
 			}
 
-			$places[] = $reflectionClassConstant->getValue();
+			if (null !== $placeAttribute->metadata && [] !== $placeAttribute->metadata) {
+				$this->placesMetadata[$placeName] = $placeAttribute->metadata;
+			}
+
+			$places[] = $placeName;
 		}
 
 		return $places;
@@ -154,11 +173,17 @@ abstract class AbstractWorkflow extends Workflow implements WorkflowInterface
 				}
 			}
 
-			$transitions[] = new WorkflowTransition(
+			$transition = new WorkflowTransition(
 				$reflectionClassConstant->getValue(),
 				$fromPlace,
 				$toPlace,
 			);
+
+			if (null !== $transitionAttribute->metadata && [] !== $transitionAttribute->metadata) {
+				$this->transitionsMetadata[$transition] = $transitionAttribute->metadata;
+			}
+
+			$transitions[] = $transition;
 		}
 
 		return $transitions;
@@ -175,5 +200,25 @@ abstract class AbstractWorkflow extends Workflow implements WorkflowInterface
 		}
 
 		return $places;
+	}
+
+	private function buildMetadataStore(?array $workflowMetadata): InMemoryMetadataStore
+	{
+		return new InMemoryMetadataStore(
+			$workflowMetadata ?? [],
+			$this->placesMetadata,
+			$this->transitionsMetadata,
+		);
+	}
+
+	private function validateDefinition(Definition $definition, string $name, string $type): void
+	{
+		if ($type === AsWorkflow::TYPE_STATE_MACHINE) {
+			(new StateMachineValidator())->validate($definition, $name);
+
+			return;
+		}
+
+		(new WorkflowValidator())->validate($definition, $name);
 	}
 }

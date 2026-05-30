@@ -44,6 +44,33 @@ public const TRANSITION_PUBLISH_FROM_REVIEW = 'publish';
 
 In `TYPE_WORKFLOW`, `from` and `to` may be arrays for multi-place transitions.
 
+## Metadata
+
+Metadata can be attached to the workflow, places, and transitions. Retrieve it via `$workflow->getMetadataStore()` (same API as Symfony YAML workflows).
+
+```php
+#[AsWorkflow(name: 'order', metadata: ['title' => 'Order workflow'])]
+class OrderWorkflow extends AbstractWorkflow
+{
+    #[Place(initial: true, metadata: ['title' => 'Draft'])]
+    public const PLACE_DRAFT = 'draft';
+
+    #[Transition(from: self::PLACE_DRAFT, to: self::PLACE_NEW, metadata: ['title' => 'Publish'])]
+    public const TRANSITION_PUBLISH = 'publish';
+}
+```
+
+## Audit trail
+
+Enable workflow activity logging (requires the `logger` service, channel `workflow`):
+
+```php
+#[AsWorkflow(name: 'order', auditTrail: true)]
+class OrderWorkflow extends AbstractWorkflow
+{
+}
+```
+
 ## Guards
 
 Guards are standard Symfony workflow guard listeners. The bundle injects the application `event_dispatcher` into each workflow service so guard events are dispatched.
