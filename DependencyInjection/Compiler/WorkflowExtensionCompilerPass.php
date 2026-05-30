@@ -3,13 +3,15 @@
 namespace LeTots\WorkflowExtension\DependencyInjection\Compiler;
 
 use LeTots\WorkflowExtension\Attribute\AsWorkflow;
+use ReflectionClass;
 use ReflectionException;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Workflow\Registry;
+use Symfony\Component\Workflow\SupportStrategy\InstanceOfSupportStrategy;
 use Symfony\Component\Workflow\WorkflowInterface;
-use ReflectionClass;
 
 class WorkflowExtensionCompilerPass implements CompilerPassInterface
 {
@@ -18,45 +20,56 @@ class WorkflowExtensionCompilerPass implements CompilerPassInterface
 	 */
 	public function process(ContainerBuilder $container): void
 	{
-		// Parcourir tous les services définis dans le conteneur
 		foreach ($container->getDefinitions() as $definition) {
 			$class = $definition->getClass();
-			
+
 			if (!$class || !class_exists($class, false)) {
 				continue;
 			}
-			
+
 			$reflectionClass = new ReflectionClass($class);
 			$attributes = $reflectionClass->getAttributes(AsWorkflow::class);
-			
+
 			foreach ($attributes as $attribute) {
 				/** @var AsWorkflow $workflowAttr */
 				$workflowAttr = $attribute->newInstance();
 				$workflowName = $workflowAttr->name;
-				$workflowSupportStrategy = $workflowAttr->supportStrategy;
-				
-				// Enregistrer le service du workflow en spécifiant explicitement la classe
-				$container->register($class)
-					->setClass($class)  // Spécifier explicitement la classe
-					->setPublic(true);
-				
-				// Ajouter le workflow au registry avec un alias basé sur le nom du workflow
-				$container->register('workflow.'.$workflowName, WorkflowInterface::class)
-					->setClass(WorkflowInterface::class)
-					->setFactory([new Reference($class), '__construct'])
-					->setPublic(true);
-				
-				// Retrouver le service Registry et ajouter le workflow
-				if ($container->hasDefinition(Registry::class)) {
+				$workflowAlias = 'workflow.'.$workflowName;
+
+				if ($container->hasDefinition($class)) {
+					$workflowDefinition = $container->findDefinition($class);
+				} else {
+					$workflowDefinition = $container->register($class)->setClass($class);
+				}
+
+				$workflowDefinition
+					->setPublic(true)
+					->setAutowired(true)
+					->setArgument('$eventDispatcher', new Reference('event_dispatcher'));
+
+				if ($container->hasDefinition($workflowAlias)) {
+					$container->removeDefinition($workflowAlias);
+				}
+
+				$container->setAlias($workflowAlias, $class)->setPublic(true);
+
+				$container->registerAliasForArgument(
+					$class,
+					WorkflowInterface::class,
+					$workflowName,
+				);
+
+				if ($container->hasDefinition(Registry::class) && null !== $workflowAttr->supportStrategy) {
 					$registryDefinition = $container->findDefinition(Registry::class);
+					$supportStrategy = is_string($workflowAttr->supportStrategy)
+						? new Definition(InstanceOfSupportStrategy::class, [$workflowAttr->supportStrategy])
+						: $workflowAttr->supportStrategy;
+
 					$registryDefinition->addMethodCall('addWorkflow', [
-						new Reference('workflow.'.$workflowName),
-						$workflowSupportStrategy
+						new Reference($class),
+						$supportStrategy,
 					]);
 				}
-				
-				// Création d'un alias pour pouvoir utiliser le workflow par son nom
-				$container->setAlias(WorkflowInterface::class . ' $'.$workflowName, 'workflow.'.$workflowName);
 			}
 		}
 	}
